@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TacsFiber Standalone IPTV & Videoke Player</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- HLS.js for .m3u8 streaming playback -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <style>
+        .tv-focusable:focus, .tv-focused {
+            outline: none !important;
+            ring: 4px solid #10b981 !important;
+            border-color: #10b981 !important;
+            background-color: rgba(16, 185, 129, 0.25) !important;
+            transform: scale(1.04);
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
+            transition: all 0.1s ease-in-out;
+        }
+    </style>
+</head>
+<body class="h-full bg-slate-950 text-slate-100 flex flex-col overflow-hidden font-sans select-none">
+
+    <!-- TOP MINIMALIST HEADER -->
+    <header class="absolute top-0 left-0 right-0 h-14 bg-gradient-to-b from-black/90 to-transparent px-6 flex justify-between items-center z-40 pointer-events-none">
+        <div class="flex items-center space-x-3 pointer-events-auto">
+            <button id="btn-menu" onclick="openChannelOverlay()" class="tv-focusable px-4 h-10 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center space-x-2 transition shadow-lg" tabindex="1">
+                <i class="fa-solid fa-tv text-sm"></i>
+                <span>Live Channels</span>
+            </button>
+            <div class="hidden sm:flex items-center space-x-2">
+                <span class="text-sm font-extrabold tracking-wide text-white">TacsFiber <span class="text-[10px] px-1.5 py-0.5 bg-emerald-500/20 text-emerald-400 rounded">TV Box OS</span></span>
+            </div>
+        </div>
+
+        <div class="flex items-center space-x-3 pointer-events-auto">
+            <div id="live-clock" class="hidden md:flex items-center space-x-2 text-xs font-mono text-emerald-400 bg-black/60 px-3 py-1 rounded-full border border-white/10 backdrop-blur">
+                <i class="fa-regular fa-clock"></i> <span class="clock-text">--:--:--</span>
+            </div>
+            <button id="btn-karaoke" onclick="openKaraokeModal()" class="tv-focusable px-3.5 h-10 rounded-xl bg-pink-600/20 hover:bg-pink-600 border border-pink-500/30 text-pink-400 hover:text-white text-xs font-bold flex items-center space-x-2 transition shadow-lg" tabindex="2">
+                <i class="fa-solid fa-microphone-lines"></i>
+                <span class="hidden md:inline">Videoke Hub</span>
+            </button>
+            <span id="current-source-badge" class="hidden lg:inline-block text-[11px] text-slate-300 bg-black/60 px-3 py-1 rounded-full border border-white/10 backdrop-blur">
+                Source: Local M3U Playlist
+            </span>
+            <button id="btn-admin" onclick="toggleAdminModal()" class="tv-focusable w-10 h-10 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center transition shadow-lg" title="Admin Settings" tabindex="3">
+                <i class="fa-solid fa-gear text-sm"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- MAIN CINEMATIC CONTAINER -->
+    <main class="flex-1 w-full h-full relative bg-black flex items-center justify-center">
+        <video id="video-player" class="w-full h-full object-contain" controls autoplay></video>
+        
+        <div id="loading-overlay" class="absolute inset-0 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center space-y-3 hidden z-30">
+            <div class="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+            <p class="text-xs text-slate-300 font-semibold tracking-wider">LOADING STREAM...</p>
+        </div>
+
+        <div id="error-overlay" class="absolute inset-0 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center space-y-3 hidden z-30 px-6 text-center">
+            <div class="w-12 h-12 rounded-full bg-red-500/20 border border-red-500/30 flex items-center justify-center text-red-400 text-lg">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+            </div>
+            <div>
+                <h3 class="text-sm font-bold text-white mb-1">Dead Link / Stream Offline Detected</h3>
+                <p id="error-message" class="text-xs text-slate-400 max-w-md">Ang channel na ito ay kasalukuyang offline o hindi ma-access ang server.</p>
+            </div>
+            <div class="flex flex-wrap justify-center gap-3 mt-3">
+                <button onclick="retryCurrentChannel()" class="tv-focusable px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl transition border border-slate-700 shadow-md">
+                    <i class="fa-solid fa-rotate-right mr-1.5"></i> Subukang Muli (Retry)
+                </button>
+                <button onclick="closeErrorAndOpenChannelList()" class="tv-focusable px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition shadow-md shadow-emerald-900/40">
+                    <i class="fa-solid fa-tv mr-1.5"></i> Pumili ng Ibang Channel
+                </button>
+            </div>
+        </div>
+
+        <!-- OFFLINE SERVER / M3U UPLOAD PROMPT MODAL -->
+        <div id="offline-upload-modal" class="absolute inset-0 w-full h-full bg-slate-950/90 backdrop-blur-lg flex items-center justify-center hidden z-50 p-4">
+            <div class="bg-slate-900 border-2 border-emerald-500/50 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl text-center">
+                <div class="w-14 h-14 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 text-2xl mx-auto">
+                    <i class="fa-solid fa-server"></i>
+                </div>
+                <div>
+                    <h3 class="text-base font-extrabold text-white">Walang Nakitang Channels</h3>
+                    <p class="text-xs text-slate-300 mt-1 leading-relaxed">
+                        Piliin ang iyong M3U playlist file o mag-load gamit ang default channels:
+                    </p>
+                </div>
+                <div class="pt-2 space-y-2.5">
+                    <button id="btn-offline-select-m3u" onclick="document.getElementById('offline-m3u-file').click()" class="tv-focusable w-full px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold rounded-xl transition shadow-lg shadow-emerald-900/40 flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-file-arrow-up text-sm"></i> Piliin ang M3U Playlist (.m3u)
+                    </button>
+                    <input type="file" id="offline-m3u-file" accept=".m3u,.m3u8" onchange="handleOfflineM3UUpload(event)" class="hidden">
+                    
+                    <button id="btn-offline-use-defaults" onclick="useDefaultsFromOfflinePrompt()" class="tv-focusable w-full px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition border border-slate-700">
+                        Gamitin Muna ang Default Channels
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div id="playing-osd" class="absolute top-16 left-6 bg-black/70 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10 flex items-center space-x-3 z-20 transition-all duration-300">
+            <div class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></div>
+            <div>
+                <span class="text-[10px] text-emerald-400 uppercase tracking-widest block font-bold">Now Playing</span>
+                <span id="current-playing-title" class="text-xs font-extrabold text-white tracking-wide">Select a channel</span>
+            </div>
+        </div>
+
+        <div id="remote-number-osd" class="absolute top-16 right-6 bg-black/90 border-2 border-emerald-500 text-emerald-400 font-mono text-2xl font-black px-6 py-3 rounded-2xl backdrop-blur-xl shadow-2xl z-50 hidden transition-all flex items-center gap-3">
+            <i class="fa-solid fa-satellite-dish animate-pulse"></i> <span id="remote-number-text">CH 1</span>
+        </div>
+
+        <!-- LIVE CHANNELS OVERLAY GRID -->
+        <div id="channel-overlay" class="absolute inset-0 w-full h-full bg-slate-950/95 backdrop-blur-2xl z-50 flex flex-col p-8 hidden">
+            <div class="flex justify-between items-center mb-6 pb-4 border-b border-slate-800">
+                <div class="flex items-center space-x-3">
+                    <div class="w-12 h-12 rounded-2xl bg-emerald-600 flex items-center justify-center text-white text-lg shadow-xl shadow-emerald-900/40">
+                        <i class="fa-solid fa-tv"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-base font-extrabold text-white">Live TV Channels List</h2>
+                        <p class="text-xs text-slate-400">Piliin ang channel o i-type ang numero sa remote</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-slate-400">
+                            <i class="fa-solid fa-magnifying-glass text-xs"></i>
+                        </span>
+                        <input type="text" id="channel-search-input" oninput="renderChannelOverlay()" placeholder="Search channel..." 
+                            class="tv-focusable w-64 sm:w-80 bg-slate-900 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-inner">
+                    </div>
+                    <button id="btn-close-channel" onclick="closeChannelOverlay()" class="tv-focusable w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition">
+                        <i class="fa-solid fa-xmark text-sm"></i>
+                    </button>
+                </div>
+            </div>
+            <div id="channel-grid-container" class="flex-1 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 pb-6 px-1"></div>
+        </div>
+
+        <!-- VIDEOKE HUB MODAL -->
+        <div id="karaoke-modal" class="absolute inset-0 w-full h-full bg-slate-950/95 backdrop-blur-2xl z-50 flex flex-col p-8 hidden">
+            <div class="flex justify-between items-center mb-6 pb-4 border-b border-slate-800">
+                <div class="flex items-center space-x-3">
+                    <div class="w-12 h-12 rounded-2xl bg-pink-600 flex items-center justify-center text-white text-lg shadow-xl shadow-pink-900/40">
+                        <i class="fa-solid fa-microphone-lines"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-base font-extrabold text-white">TacsFiber Videoke Hub</h2>
+                        <p class="text-xs text-slate-400">Pindutin ang numero sa remote o i-type ang song code</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-slate-400">
+                            <i class="fa-solid fa-magnifying-glass text-xs"></i>
+                        </span>
+                        <input type="text" id="karaoke-search-input" oninput="filterKaraokeGrid()" placeholder="I-type ang title o code (e.g. 001)..." 
+                            class="tv-focusable w-72 sm:w-96 bg-slate-900 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-pink-500 shadow-inner">
+                    </div>
+                    <button id="btn-close-karaoke" onclick="closeKaraokeModal()" class="tv-focusable w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition">
+                        <i class="fa-solid fa-xmark text-sm"></i>
+                    </button>
+                </div>
+            </div>
+            <div id="karaoke-grid-container" class="flex-1 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 pb-6 px-1"></div>
+        </div>
+
+        <!-- ADMIN SETTINGS MODAL WITH PIN PROTECTION -->
+        <div id="admin-modal" class="absolute inset-0 w-full h-full bg-black/80 backdrop-blur-md flex items-center justify-center hidden z-50 p-4">
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                    <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                        <i class="fa-solid fa-gear text-emerald-500"></i> Operator / Admin Settings
+                    </h3>
+                    <button onclick="toggleAdminModal()" class="tv-focusable text-slate-400 hover:text-white text-sm p-2 rounded-lg">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+
+                <div class="space-y-2">
+                    <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Load via M3U URL</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="m3u-url-input" placeholder="https://.../playlist.m3u" 
+                            class="tv-focusable flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                        <button onclick="loadM3UFromURL()" class="tv-focusable px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition shadow-md shadow-emerald-900/30">
+                            <i class="fa-solid fa-cloud-arrow-down"></i> Load
+                        </button>
+                    </div>
+                </div>
+
+                <div class="space-y-2">
+                    <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Import Local File</label>
+                    <label class="tv-focusable flex items-center justify-center w-full px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl cursor-pointer transition border border-slate-700">
+                        <i class="fa-solid fa-file-arrow-up mr-2 text-sm text-emerald-400"></i> Upload .m3u Playlist
+                        <input type="file" accept=".m3u,.m3u8" onchange="handleM3UUpload(event)" class="hidden">
+                    </label>
+                </div>
+
+                <div class="pt-3 border-t border-slate-800 flex justify-between items-center">
+                    <span class="text-[11px] text-slate-400">Restore default channel list</span>
+                    <button onclick="resetDefaultChannels()" class="tv-focusable px-3 py-2 bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 text-red-400 text-xs font-bold rounded-xl transition">
+                        <i class="fa-solid fa-rotate-left mr-1"></i> Reset Defaults
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        const defaultChannels = [
+            {
+                id: 1,
+                name: "UNTV News & Rescue",
+                category: "Local News & Public",
+                logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/45/UNTV_logo.svg/512px-UNTV_logo.svg.png",
+                url: "https://stream.untvweb.com/live/untv_live/playlist.m3u8"
+            },
+            {
+                id: 2,
+                name: "PTV 4 News",
+                category: "Government News",
+                logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/PTV_Philippines_2021.svg/512px-PTV_Philippines_2021.svg.png",
+                url: "https://live.ptv.ph/hls/live.m3u8"
+            },
+            {
+                id: 3,
+                name: "One News PH",
+                category: "News & Public Affairs",
+                logo: "https://upload.wikimedia.org/wikipedia/commons/e/e4/One_News_PH_logo.png",
+                url: "https://cignal-onenews.tvcc.cignal.tv/live/eds/OneNews/playlist.m3u8"
+            },
+            {
+                id: 4,
+                name: "Net 25",
+                category: "General Entertainment",
+                logo: "https://upload.wikimedia.org/wikipedia/commons/c/c5/Net_25_logo_2021.png",
+                url: "https://net25.live-s.cdn.on.net/live/playlist.m3u8"
+            }
+        ];
+
+        let liveChannels = JSON.parse(localStorage.getItem('tacs_iptv_channels')) || [];
+        let karaokeSongs = JSON.parse(localStorage.getItem('tacs_karaoke_songs')) || [];
+        
+        let activeChannelId = null;
+        let hls = null;
+        let currentChannelObj = null;
+        let favorites = JSON.parse(localStorage.getItem('tacs_iptv_favorites')) || [];
+        let isAdminLoggedIn = false;
+        
+        let typedChannelNumber = "";
+        let numberOsdTimeout = null;
+
+        setInterval(() => {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            document.querySelectorAll('.clock-text').forEach(el => el.innerText = timeString);
+        }, 1000);
+
+        // OFFLINE PROMPT FUNCTIONS
+        function openOfflineUploadPrompt() {
+            const modal = document.getElementById('offline-upload-modal');
+            if (modal) modal.classList.remove('hidden');
+        }
+
+        function closeOfflineUploadPrompt() {
+            const modal = document.getElementById('offline-upload-modal');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        function handleOfflineM3UUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                parseSingleM3UContent(e.target.result, file.name, true);
+                closeOfflineUploadPrompt();
+                if (liveChannels.length > 0) {
+                    playChannel(liveChannels[0]);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function useDefaultsFromOfflinePrompt() {
+            liveChannels = [...defaultChannels];
+            localStorage.setItem('tacs_iptv_channels', JSON.stringify(liveChannels));
+            document.getElementById('current-source-badge').innerText = "Source: Default Channels";
+            closeOfflineUploadPrompt();
+            if (liveChannels.length > 0) {
+                playChannel(liveChannels[0]);
+            }
+        }
+
+        function openChannelOverlay() {
+            const overlay = document.getElementById('channel-overlay');
+            overlay.classList.remove('hidden');
+            document.getElementById('channel-search-input').value = '';
+            renderChannelOverlay();
+            setTimeout(() => {
+                document.getElementById('channel-search-input').focus();
+            }, 100);
+        }
+
+        function closeChannelOverlay() {
+            document.getElementById('channel-overlay').classList.add('hidden');
+            document.getElementById('btn-menu').focus();
+        }
+
+        function closeErrorAndOpenChannelList() {
+            document.getElementById('error-overlay').classList.add('hidden');
+            openChannelOverlay();
+        }
+
+        function toggleAdminModal() {
+            if (!isAdminLoggedIn) {
+                let pin = prompt("🔐 Enter Admin PIN para sa Operator Settings:");
+                if (pin === null) return;
+                if (pin === "1234") {
+                    isAdminLoggedIn = true;
+                    document.getElementById('admin-modal').classList.remove('hidden');
+                    setTimeout(() => {
+                        const firstAdminInput = document.querySelector('#admin-modal .tv-focusable');
+                        if (firstAdminInput) firstAdminInput.focus();
+                    }, 100);
+                } else {
+                    alert("❌ Maling PIN! View-only mode ka lang, bossing.");
+                }
+            } else {
+                const modal = document.getElementById('admin-modal');
+                modal.classList.toggle('hidden');
+                if (!modal.classList.contains('hidden')) {
+                    setTimeout(() => {
+                        const firstAdminInput = document.querySelector('#admin-modal .tv-focusable');
+                        if (firstAdminInput) firstAdminInput.focus();
+                    }, 100);
+                } else {
+                    document.getElementById('btn-admin').focus();
+                }
+            }
+        }
+
+        function openKaraokeModal() {
+            const modal = document.getElementById('karaoke-modal');
+            modal.classList.remove('hidden');
+            document.getElementById('karaoke-search-input').value = '';
+            renderKaraokeGrid('');
+            setTimeout(() => {
+                document.getElementById('karaoke-search-input').focus();
+            }, 100);
+        }
+
+        function closeKaraokeModal() {
+            document.getElementById('karaoke-modal').classList.add('hidden');
+            document.getElementById('btn-karaoke').focus();
+        }
+
+        function filterKaraokeGrid() {
+            const query = document.getElementById('karaoke-search-input').value.toLowerCase();
+            renderKaraokeGrid(query);
+        }
+
+        function renderKaraokeGrid(query = '') {
+            const container = document.getElementById('karaoke-grid-container');
+            container.innerHTML = '';
+
+            const filtered = karaokeSongs.filter(song => 
+                song.name.toLowerCase().includes(query) || (song.id && song.id.toString().includes(query))
+            );
+
+            if (filtered.length === 0) {
+                container.innerHTML = `<div class="col-span-full text-center py-20 text-slate-500 text-xs">Walang nakitang kanta. I-load ang M3U o i-check ang playlist.</div>`;
+                return;
+            }
+
+            filtered.forEach(song => {
+                const card = document.createElement('div');
+                card.className = "tv-focusable group bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-pink-500/60 rounded-2xl p-4 flex flex-col items-center text-center cursor-pointer transition-all duration-200 shadow-lg";
+                card.tabIndex = 0;
+                card.onclick = () => {
+                    playChannel(song);
+                    closeKaraokeModal();
+                };
+                card.innerHTML = `
+                    <div class="w-14 h-14 rounded-2xl bg-pink-500/10 border border-pink-500/20 flex items-center justify-center text-pink-400 text-xl mb-3 group-hover:scale-110 transition shadow-inner">
+                        <i class="fa-solid fa-microphone"></i>
+                    </div>
+                    <span class="text-[10px] font-mono text-pink-400 bg-pink-500/10 px-2 py-0.5 rounded-full mb-1">CH #${song.id}</span>
+                    <h4 class="text-xs font-bold text-white line-clamp-2 group-hover:text-pink-300 transition">${song.name}</h4>
+                    <span class="text-[10px] text-slate-400 mt-1">Karaoke Song</span>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function renderChannelOverlay() {
+            const container = document.getElementById('channel-grid-container');
+            container.innerHTML = '';
+
+            const query = document.getElementById('channel-search-input').value.toLowerCase();
+            const filtered = liveChannels.filter(ch => ch.name.toLowerCase().includes(query) || ch.id.toString().includes(query));
+
+            if (filtered.length === 0) {
+                container.innerHTML = `<div class="col-span-full text-center py-20 text-slate-500 text-sm">Walang nahanap na live channel.</div>`;
+                return;
+            }
+
+            filtered.forEach(ch => {
+                const isFav = favorites.includes(ch.url);
+                const card = document.createElement('div');
+                card.className = "tv-focusable group bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-emerald-500/60 rounded-2xl p-4 flex flex-col items-center text-center cursor-pointer transition-all duration-200 shadow-lg relative";
+                card.tabIndex = 0;
+                card.onclick = () => {
+                    playChannel(ch);
+                    closeChannelOverlay();
+                };
+                card.innerHTML = `
+                    <span class="absolute top-3 left-3 bg-emerald-600 text-white font-mono text-[10px] px-2 py-0.5 rounded-full font-bold shadow">CH #${ch.id}</span>
+                    <button onclick="toggleFavorite(event, '${ch.url}')" class="tv-focusable absolute top-3 right-3 p-2 text-slate-400 hover:text-amber-400 transition" title="Toggle Favorite">
+                        <i class="${isFav ? 'fa-solid text-amber-400' : 'fa-regular'} fa-star text-base"></i>
+                    </button>
+                    <div class="w-16 h-16 rounded-2xl bg-slate-950 border border-slate-800 p-2 flex items-center justify-center mb-3 mt-2 group-hover:scale-105 transition shadow-inner">
+                        <img src="${ch.logo}" alt="${ch.name}" class="object-contain w-full h-full" onerror="this.src='https://upload.wikimedia.org/wikipedia/commons/3/3f/Placeholder_view_vector.svg'">
+                    </div>
+                    <h4 class="text-xs font-bold text-white line-clamp-2 group-hover:text-emerald-400 transition mb-1">${ch.name}</h4>
+                    <span class="text-[10px] text-slate-400">${ch.category}</span>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function toggleFavorite(event, channelUrl) {
+            event.stopPropagation();
+            const index = favorites.indexOf(channelUrl);
+            if (index > -1) {
+                favorites.splice(index, 1);
+            } else {
+                favorites.push(channelUrl);
+            }
+            localStorage.setItem('tacs_iptv_favorites', JSON.stringify(favorites));
+            renderChannelOverlay();
+        }
+
+        function handleM3UUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                parseSingleM3UContent(e.target.result, file.name, true);
+                toggleAdminModal();
+            };
+            reader.readAsText(file);
+        }
+
+        function loadM3UFromURL() {
+            let rawUrl = document.getElementById('m3u-url-input').value;
+            let cleanUrl = rawUrl.replace(/^\[|\]$|^['"]|['"]$/g, '').trim();
+
+            if (!cleanUrl) {
+                alert("Ilagay muna ang valid na M3U URL, bossing.");
+                return;
+            }
+
+            fetch(cleanUrl)
+                .then(res => res.text())
+                .then(data => {
+                    parseSingleM3UContent(data, "Custom URL", true);
+                    toggleAdminModal();
+                })
+                .catch(() => alert("Hindi ma-fetch ang URL."));
+        }
+
+        function parseSingleM3UContent(m3uText, sourceName, showAlerts) {
+            const lines = m3uText.split(/\r?\n/);
+            let parsedItems = [];
+            let currentItem = {};
+
+            for (let i = 0; i < lines.length; i++) {
+                let line = lines[i].trim();
+                if (line.startsWith('#EXTINF:')) {
+                    const groupMatch = line.match(/group-title="([^"]*)"/);
+                    const category = groupMatch ? groupMatch[1] : "General Channels";
+                    const logoMatch = line.match(/tvg-logo="([^"]*)"/);
+                    const logo = logoMatch ? logoMatch[1] : "https://upload.wikimedia.org/wikipedia/commons/3/3f/Placeholder_view_vector.svg";
+                    const commaIndex = line.lastIndexOf(',');
+                    const name = commaIndex !== -1 ? line.substring(commaIndex + 1).trim() : `Channel`;
+                    currentItem = { name, category, logo };
+                } else if (line && !line.startsWith('#')) {
+                    currentItem.url = line;
+                    if (currentItem.name && currentItem.url) {
+                        parsedItems.push(currentItem);
+                    }
+                    currentItem = {};
+                }
+            }
+
+            if (parsedItems.length > 0) {
+                let isKaraoke = sourceName.includes("Local Media") || sourceName.includes("Karaoke") || parsedItems.every(item => item.url.toLowerCase().endsWith('.mp4') || item.url.toLowerCase().includes('song files'));
+                if (isKaraoke) {
+                    karaokeSongs = parsedItems.map((item, index) => ({ ...item, id: index + 1 }));
+                    localStorage.setItem('tacs_karaoke_songs', JSON.stringify(karaokeSongs));
+                } else {
+                    // Safety filter para sa live channels
+                    let cleanLive = parsedItems.filter(item => !item.url.toLowerCase().includes('song files') && !item.url.toLowerCase().endsWith('.mp4'));
+                    
+                    // KUNIN ANG LUMANG CHANNELS AT IDAGDAG ANG MGA BAGO (MERGE) PARA HINDI MAWALA ANG MGA NAUNA
+                    let existingChannels = JSON.parse(localStorage.getItem('tacs_iptv_channels')) || [];
+                    
+                    // Iwasan ang duplicate URLs
+                    const existingUrls = new Set(existingChannels.map(c => c.url));
+                    let uniqueNewChannels = cleanLive.filter(item => !existingUrls.has(item.url));
+                    
+                    // Pagsamahin ang luma at bago
+                    let combined = [...existingChannels, ...uniqueNewChannels];
+                    
+                    // Re-index ID numbering para sunod-sunod mula 1 hanggang dulo
+                    liveChannels = combined.map((item, index) => ({ ...item, id: index + 1 }));
+                    
+                    localStorage.setItem('tacs_iptv_channels', JSON.stringify(liveChannels));
+                    if (showAlerts) alert(`✅ Tagumpay! May kabuuang ${liveChannels.length} na channels na ngayon sa listahan.`);
+                }
+            }
+        }
+
+        function resetDefaultChannels() {
+            if (confirm("Gusto mo bang i-reset sa default channels ang listahan?")) {
+                localStorage.removeItem('tacs_iptv_channels');
+                localStorage.removeItem('tacs_karaoke_songs');
+                localStorage.removeItem('tacs_iptv_source');
+                liveChannels = [...defaultChannels];
+                localStorage.setItem('tacs_iptv_channels', JSON.stringify(liveChannels));
+                karaokeSongs = [];
+                document.getElementById('current-source-badge').innerText = "Source: Default";
+                playChannel(liveChannels[0]);
+                toggleAdminModal();
+            }
+        }
+
+        function playChannel(ch) {
+            currentChannelObj = ch;
+            activeChannelId = ch.id;
+            document.getElementById('current-playing-title').innerText = `CH #${ch.id}: ${ch.name}`;
+            
+            const video = document.getElementById('video-player');
+            const loader = document.getElementById('loading-overlay');
+            const errorOverlay = document.getElementById('error-overlay');
+            
+            errorOverlay.classList.add('hidden');
+            loader.classList.remove('hidden');
+
+            if (ch.url.toLowerCase().endsWith('.mp4') || ch.url.toLowerCase().endsWith('.webm') || !ch.url.includes('http')) {
+                if (hls) {
+                    hls.destroy();
+                    hls = null;
+                }
+                let cleanUrl = ch.url.replace(/\\/g, '/');
+                
+                // Korte-siguro: Kung ang URL ay simpleng filename lang at walang path o http, lagyan ng 'songs/' folder
+                if (!cleanUrl.startsWith('http') && !cleanUrl.startsWith('/') && !cleanUrl.includes('songs/')) {
+                    cleanUrl = 'songs/' + cleanUrl;
+                }
+
+                video.src = encodeURI(cleanUrl);
+                video.load();
+                video.onerror = () => {
+                    loader.classList.add('hidden');
+                    errorOverlay.classList.remove('hidden');
+                    document.getElementById('error-message').innerText = `Dead Link / Offline ang local file: ${ch.name} (${cleanUrl})`;
+                };
+                video.onloadeddata = () => {
+                    video.play().catch(e => console.log("Autoplay blocked:", e));
+                    loader.classList.add('hidden');
+                };
+                return;
+            }
+
+            if (Hls.isSupported()) {
+                if (hls) {
+                    hls.destroy();
+                }
+                // OPTIMIZED HLS BUFFER SETTINGS (Iwas static at iwas buffer)
+                hls = new Hls({
+                    liveSyncDurationCount: 6,
+                    liveMaxLatencyDurationCount: 20,
+                    maxBufferSize: 30 * 1000 * 1000,
+                    maxBufferLength: 30,
+                    enableWorker: true,
+                    lowLatencyMode: false
+                });
+                hls.loadSource(ch.url);
+                hls.attachMedia(video);
+                
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    video.play().catch(e => console.log("Autoplay blocked:", e));
+                    loader.classList.add('hidden');
+                });
+
+                hls.on(Hls.Events.ERROR, (event, data) => {
+                    if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
+                        console.log("Buffer stalled, auto-recovering...");
+                        hls.recoverMediaError();
+                        return;
+                    }
+                    if (data.fatal) {
+                        loader.classList.add('hidden');
+                        errorOverlay.classList.remove('hidden');
+                        document.getElementById('error-message').innerText = `Dead Link: Ang "${ch.name}" ay offline o expired na ang stream URL.`;
+                    }
+                });
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                video.src = ch.url;
+                video.onerror = () => {
+                    loader.classList.add('hidden');
+                    errorOverlay.classList.remove('hidden');
+                    document.getElementById('error-message').innerText = `Dead Link: Hindi ma-play ang stream para sa ${ch.name}`;
+                };
+                video.addEventListener('loadedmetadata', () => {
+                    video.play();
+                    loader.classList.add('hidden');
+                });
+            }
+        }
+
+        function retryCurrentChannel() {
+            if (currentChannelObj) {
+                playChannel(currentChannelObj);
+            }
+        }
+
+        // OPTIMIZED TV REMOTE SMART SCOPED NAVIGATION (100% Intact and Smooth)
+        document.addEventListener('keydown', (e) => {
+            const karaokeModal = document.getElementById('karaoke-modal');
+            const channelOverlay = document.getElementById('channel-overlay');
+            const adminModal = document.getElementById('admin-modal');
+            const offlineModal = document.getElementById('offline-upload-modal');
+
+            const isKaraokeOpen = !karaokeModal.classList.contains('hidden');
+            const isChannelOpen = !channelOverlay.classList.contains('hidden');
+            const isAdminOpen = !adminModal.classList.contains('hidden');
+            const isOfflineOpen = !offlineModal.classList.contains('hidden');
+
+            if (e.key === 'Escape' || e.key === 'Backspace' || e.keyCode === 27 || e.keyCode === 4) {
+                if (isOfflineOpen) {
+                    e.preventDefault();
+                    useDefaultsFromOfflinePrompt();
+                    return;
+                }
+                if (isChannelOpen) {
+                    e.preventDefault();
+                    closeChannelOverlay();
+                    return;
+                }
+                if (isKaraokeOpen) {
+                    e.preventDefault();
+                    closeKaraokeModal();
+                    return;
+                }
+                if (isAdminOpen) {
+                    e.preventDefault();
+                    toggleAdminModal();
+                    return;
+                }
+            }
+
+            if (!isChannelOpen && !isKaraokeOpen && !isAdminOpen && !isOfflineOpen && e.key >= '0' && e.key <= '9') {
+                e.preventDefault();
+                typedChannelNumber += e.key;
+                
+                const osd = document.getElementById('remote-number-osd');
+                const osdText = document.getElementById('remote-number-text');
+                osdText.innerText = `CH ${typedChannelNumber}`;
+                osd.classList.remove('hidden');
+
+                clearTimeout(numberOsdTimeout);
+                numberOsdTimeout = setTimeout(() => {
+                    const targetId = parseInt(typedChannelNumber);
+                    const found = liveChannels.find(c => c.id === targetId);
+                    if (found) {
+                        playChannel(found);
+                    }
+                    typedChannelNumber = "";
+                    osd.classList.add('hidden');
+                }, 1200);
+                return;
+            }
+
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                let activeContainer = document.body;
+                if (isOfflineOpen) activeContainer = offlineModal;
+                else if (isChannelOpen) activeContainer = channelOverlay;
+                else if (isKaraokeOpen) activeContainer = karaokeModal;
+                else if (isAdminOpen) activeContainer = adminModal;
+
+                const focusables = Array.from(activeContainer.querySelectorAll('.tv-focusable, button, input')).filter(el => {
+                    return el.offsetParent !== null && !el.disabled;
+                });
+
+                const currentIndex = focusables.indexOf(document.activeElement);
+
+                if (focusables.length > 0) {
+                    e.preventDefault();
+                    let nextIndex = currentIndex;
+
+                    if (currentIndex === -1) {
+                        nextIndex = 0;
+                    } else {
+                        const isGridContainer = activeContainer.id === 'channel-overlay' || activeContainer.id === 'karaoke-modal';
+                        const cols = window.innerWidth >= 1024 ? 5 : (window.innerWidth >= 768 ? 4 : 2);
+
+                        if (isGridContainer && currentIndex >= 2) { 
+                            let gridIdx = currentIndex - 2;
+                            let totalCards = focusables.length - 2;
+
+                            if (e.key === 'ArrowRight') {
+                                gridIdx = (gridIdx + 1) % totalCards;
+                            } else if (e.key === 'ArrowLeft') {
+                                gridIdx = (gridIdx - 1 + totalCards) % totalCards;
+                            } else if (e.key === 'ArrowDown') {
+                                gridIdx = Math.min(gridIdx + cols, totalCards - 1);
+                            } else if (e.key === 'ArrowUp') {
+                                if (gridIdx < cols) {
+                                    nextIndex = 0;
+                                    focusables[nextIndex].focus();
+                                    return;
+                                }
+                                gridIdx = Math.max(gridIdx - cols, 0);
+                            }
+                            nextIndex = gridIdx + 2;
+                        } else {
+                            if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+                                nextIndex = (currentIndex + 1) % focusables.length;
+                            } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+                                nextIndex = (currentIndex - 1 + focusables.length) % focusables.length;
+                            }
+                        }
+                    }
+                    focusables[nextIndex].focus();
+                }
+            }
+        });
+
+        // HULING INAYOS: Window onload na hindi nagbubura ng channels at naglo-load nang maayos
+        window.onload = () => {
+            // 1. Auto-fetch songs.json para sa Karaoke
+            fetch('songs.json')
+                .then(res => res.json())
+                .then(data => {
+                    if (data && data.length > 0) {
+                        karaokeSongs = data;
+                        localStorage.setItem('tacs_karaoke_songs', JSON.stringify(karaokeSongs));
+                    }
+                })
+                .catch(() => console.log("Gamit ang cached karaoke songs."));
+
+            // 2. SMART FALLBACK PARA SA TV, PHONES, AT EDGE BROWSER
+            // Unahing basahin ang localStorage kung may naka-save na, para hindi maipit sa upload modal
+            let savedChannels = JSON.parse(localStorage.getItem('tacs_iptv_channels')) || [];
+            
+            if (savedChannels.length > 0) {
+                liveChannels = savedChannels;
+                playChannel(liveChannels[0]);
+            } else {
+                // Kung wala pang naka-save, subukang i-fetch sa server
+                fetch('tacs_media.m3u')
+                    .then(res => {
+                        if (!res.ok) throw new Error("M3U not found");
+                        return res.text();
+                    })
+                    .then(m3uText => {
+                        parseSingleM3UContent(m3uText, "Server M3U Playlist", false);
+                        if (liveChannels.length > 0) {
+                            playChannel(liveChannels[0]);
+                        } else {
+                            useDefaultAndPlay();
+                        }
+                    })
+                    .catch(() => {
+                        // KUNG NAG-FAIL SA TV/PHONE/EDGE: Huwag nang mag-pop up ng modal, gumamit na lang ng defaults o cache!
+                        useDefaultAndPlay();
+                    });
+            }
+
+            // Auto-focus main menu button on startup
+            setTimeout(() => {
+                document.getElementById('btn-menu').focus();
+            }, 300);
+        };
+
+        function useDefaultAndPlay() {
+            liveChannels = [...defaultChannels];
+            localStorage.setItem('tacs_iptv_channels', JSON.stringify(liveChannels));
+            playChannel(liveChannels[0]);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+let channels = [];
+
+fetch('channels.json')
+    .then(response => response.json())
+    .then(data => {
+        channels = data;
+        renderChannels();
+        if(channels.length > 0) playChannel(channels[0]);
+    })
+    .catch(err => console.error('Error loading channels:', err));
