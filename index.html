@@ -563,19 +563,13 @@
                     hls.destroy();
                     hls = null;
                 }
-                let cleanUrl = ch.url.replace(/\\/g, '/');
-                
-                // Korte-siguro: Kung ang URL ay simpleng filename lang at walang path o http, lagyan ng 'songs/' folder
-                if (!cleanUrl.startsWith('http') && !cleanUrl.startsWith('/') && !cleanUrl.includes('songs/')) {
-                    cleanUrl = 'songs/' + cleanUrl;
-                }
-
+                const cleanUrl = ch.url.replace(/\\/g, '/');
                 video.src = encodeURI(cleanUrl);
                 video.load();
                 video.onerror = () => {
                     loader.classList.add('hidden');
                     errorOverlay.classList.remove('hidden');
-                    document.getElementById('error-message').innerText = `Dead Link / Offline ang local file: ${ch.name} (${cleanUrl})`;
+                    document.getElementById('error-message').innerText = `Dead Link / Offline ang local file: ${ch.name}`;
                 };
                 video.onloadeddata = () => {
                     video.play().catch(e => console.log("Autoplay blocked:", e));
